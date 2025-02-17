@@ -170,6 +170,50 @@ class GenericContentsManager(ContentsManager, HasTraits):
         )
         return self._file_model_from_path(path, content=content, format=format)
 
+    def fill_last_modified(self, data):
+        """
+        Fills the 'LastModified' field of directories in the list based on the
+        modification date of the most recent file within each directory.
+
+        Args:
+            data: A list of dictionaries, where each dictionary represents a
+                  file or directory.
+
+        Returns:
+            The list of dictionaries with the 'LastModified' field of directories
+            updated.
+        """
+
+        # Dictionary to store the latest LastModified of each directory
+        directories_last_modified = {}
+
+        # First, iterate over the files to find the latest in each directory
+        for item in data:
+            if item['type'] == 'file':
+                # Extract the "parent" of the file (the directory)
+                parts = item['Key'].split('/')
+                directory = '/'.join(parts[:-1]) + '/'  # Ensure the trailing slash
+
+                if directory:  # Ignore files at the root
+                    if directory not in directories_last_modified or item['LastModified'] > \
+                            directories_last_modified[directory]:
+                        directories_last_modified[directory] = item['LastModified']
+
+        # Now, iterate over the directories to update the LastModified
+        for item in data:
+            if item['type'] == 'directory':
+                directory = item['Key']
+
+                if directory in directories_last_modified:
+                    item['LastModified'] = directories_last_modified[directory]
+                else:
+                    # Handle the case of directories without files inside (optional)
+                    print(f"Warning: Directory '{directory}' without files found.")
+                    item['LastModified'] = datetime.datetime.min.replace(tzinfo=item[
+                        'LastModified'].tzinfo)  # Set to the earliest possible datetime. Or None.
+
+        return data
+
     def _directory_model_from_path(self, path, content=False):
         self.log.debug(
             "S3contents.GenericManager._directory_model_from_path: path('%s') type(%s)",
@@ -233,7 +277,7 @@ class GenericContentsManager(ContentsManager, HasTraits):
                     lstat = await self.fs.fs._info(dir_path)
                     s3_detail["LastModified"] = lstat["LastModified"]
                 except FileNotFoundError:
-                    pass
+                    s3_detail["LastModified"] = datetime.datetime(2025, 1, 1, 0, 0, 0)
             st_time = s3_detail.get("LastModified")
             if st_time:
                 s3_detail["ST_MTIME"] = datetime.datetime(
